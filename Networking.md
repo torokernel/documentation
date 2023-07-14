@@ -1,9 +1,9 @@
 # Networking
 ## Introduction
-This document presents how networking works in Toro unikernel. The unit in charge of networking is `Network.pas`. This document only describes the machinery to provide networking to the user application. This is not a tutorial. This document first present what is a network driver and how is registered to kernel. Then, the document presents the primitives to send and receive packets. It finishes by presenting how sockets are implemented by relying on those primitives.
+This document presents how networking works in Toro unikernel. The unit in charge of networking is `Network.pas`. This document only describes the machinery to provide networking to the user application. This is not a tutorial. This document first presents what is a network driver and how it is registered to the kernel. Then, the document presents the primitives to send and receive packets. It finishes by presenting how sockets are implemented by relying on those primitives.
 
 ## Network drivers
-Network drivers are units that registers a `TNetWorkInterface` to the kernel. The kernel uses this interface to send and receive packets through a network. A driver calls `RegisterNetworkInterface()` to register a new `PNetworkInterface` structure to the kernel. This procedure is declared as follows:
+Network drivers are units that register a `TNetWorkInterface` to the kernel. The kernel uses this interface to send and receive packets through a network. A driver calls `RegisterNetworkInterface()` to register a new `PNetworkInterface` structure to the kernel. This procedure is declared as follows:
 ```pascal
 procedure RegisterNetworkInterface(NetInterface: PNetworkInterface);
 ```
@@ -30,12 +30,12 @@ During registration, the kernel enqueues the `PNetWorkInterface` structure into 
 * `IncomingPackets`, a queue of incoming packets that follows a *last in first out* strategy
 
 The structure defines a set of methods to interact with the kernel:
-* `start()`, initializates the driver
+* `start()`, initialises the driver
 * `send()`, sends a packet through the driver.
 * `reset()`, tells the driver to re-initialize the device
 * `stop()`, tells the driver to stop receiving packets.
 
-Each network driver must be dedicated to a core before user can use it. The device can only be dedicated to a single core during the lifetime of the system. In other words, the dedicated core cannot change. The `CPUID` identifies which CPU is allowed to access to a driver.
+Each network driver must be dedicated to a core before the user can use it. The device can only be dedicated to a single core during the lifetime of the system. In other words, the dedicated core cannot change. The `CPUID` identifies which CPU is allowed to access a driver.
 
 The user calls `DedicateNetworkSocket()` to dedicate a driver to the current core. The procedure uses the name of the driver to select a driver from the list. The procedure is declared as follows:
 ```pascal
@@ -51,32 +51,32 @@ The function that handles packets is declared as follows:
 ```pascal
 function ProcessSocketPacket(Param: Pointer): PtrUInt;
 ```
-Toro only supports packets that conforms to **virtio-vsock**. Thus, the `ProcessSocketPacket()` function expects those type of packets. To add support for ethernet packets, a diferent function shall be used.
+Toro only supports packets that conforms to **virtio-vsock**. Thus, the `ProcessSocketPacket()` function expects those types of packets. To add support for ethernet packets, a different function shall be used.
 
 ## Network Packets
-* The Network unit provides the `SysNetworkSend()` and `SysNetworkRead()` functions to send and receive network packets. The functions use the driver that has been registered in the current core. These functions require to first registered a network card.
+* The Network unit provides the `SysNetworkSend()` and `SysNetworkRead()` functions to send and receive network packets. The functions use the driver that has been registered in the current core. These functions require you to first register a network card.
 * `SysNetWorkPacketSend()` is defined as follows:
 ```pascal
 procedure SysNetworkSend(Packet: PPacket);
 ```
-* These function is neither thread safe nor interruption safe. For this reason, it must not be used in the context of an interruption handler. The cooperative scheduler ensures non-preemption. That said, it is impossible to have two instances of the function in a different thread in the same core.
-* When using this function, sender loses the ownership of the packet. It is the network stack that releases the packet after the driver confirms that it has been sent.
+* This function is neither thread safe nor interruption safe. For this reason, it must not be used in the context of an interruption handler. The cooperative scheduler ensures non-preemption. That said, it is impossible to have two instances of the function in a different thread in the same core.
+* When using this function, the sender loses the ownership of the packet. It is the network stack that releases the packet after the driver confirms that it has been sent.
 
 ### Transmission Path
 * The transmission of a packet follows the these steps:
-1. During the SysNetworkSend(), the network stack gets the network interface that is dedicated to current core and issues a `send()` in the corresponding driver. The function returns without knowing if packet has been sent.
+1. During the SysNetworkSend(), the network stack gets the network interface that is dedicated to the current core and issues a `send()` in the corresponding driver. The function returns without knowing if the packet has been sent.
 2. The driver handles the new packet. For example, in the case of `VirtIOVSocket`, the `Packet.Data` buffer is enqueued in the available ring of the transmission queue.
 3. Once the packet has been sent, i.e., the device has consumed the buffer, the driver tells the kernel that the packet has been sent by invoking `DequeueOutgoingPacket()`:
 4. The kernel releases the `TPacket` structure and its payload, i.e., `Packet.Data`.
 
-Note that in the case of the virtio-vsock driver, the data is enqueued in the available ring of the transmision queue. This is the buffer that SysSocketSend has allocated. After the device consumes the buffer, the driver informs the kernel that the packet has been sent. The kernel can release the memory for the packet.
+Note that in the case of the virtio-vsock driver, the data is enqueued in the available ring of the transmission queue. This is the buffer that SysSocketSend has allocated. After the device consumes the buffer, the driver informs the kernel that the packet has been sent. The kernel can release the memory for the packet.
 
 ### Reception Path
 * The reception of a packet happens in these steps:
 1. When a new packet is received, the driver informs the kernel by using `EnqueueIncomingPacket()`.
-2. The packet is enqueued in the network's card incoming packet queue. The only producer is the network card and the only consumer is the `SysNetworkRead()` function which is usually invoked by a single thread from the same core. Together with the cooperative scheduler, this ensures no race condition when reading such list. This function is not interrupt-safe so caller must disable interruptions. Otherwise, the arrival of a new packet will race with the current function. Packets are read by using `SysNetworkRead()` function. This function returns a packet from the `IncomingPackets` queue of the current core.
+2. The packet is enqueued in the network's card incoming packet queue. The only producer is the network card and the only consumer is the `SysNetworkRead()` function which is usually invoked by a single thread from the same core. Together with the cooperative scheduler, this ensures no race condition when reading such a list. This function is not interrupt-safe so the caller must disable interruptions. Otherwise, the arrival of a new packet will race with the current function. Packets are read by using the `SysNetworkRead()` function. This function returns a packet from the `IncomingPackets` queue of the current core.
 
-## Processing Incomming Packets
+## Processing Incoming Packets
 TODO:
 ```pascal
 function ProcessSocketPacket(Param: Pointer): PtrUInt;
@@ -194,8 +194,8 @@ end;
 ```
 
 ## Sockets
-* On top of the networking primitives to send and receive packet, there is the socket layer that parses those packets and tranlates them a stream or datagram connections between two sockets. Sockets allow to communicate applications over a network. Toro supports only AF_VSOCK sockets. The Toro API to manipulate sockets looks like the POSIX API.
-* When using AF_VSOCK, the host is always identified with the number 2 and the the guest id is defined by the user when invoking QEMU.
+* On top of the networking primitives to send and receive packets, there is the socket layer that parses those packets and translates them into stream or datagram connections between two sockets. Sockets allow applications to communicate over a network. Toro supports only AF_VSOCK sockets. The Toro API to manipulate sockets looks like the POSIX API.
+* When using AF_VSOCK, the host is always identified with the number 2 and the guest id is defined by the user when invoking QEMU.
 *
 * A socket is defined as follows:
 ```pascal
@@ -232,25 +232,25 @@ function SysSocket(SocketType: LongInt): PSocket;
 ```
 * This function returns a pointer to a TSocket structure or Nil if it fails.
 * The only supported type is SOCKET_STREAM which refers to stream sockets.
-* A SOCKET_STREAM has control flow. SOCKET_DGRAM are not supported.
-* The function simple initializes the structures and returns a new socket.
+* A SOCKET_STREAM has control flow. SOCKET_DGRAM is not supported.
+* The function simply initialises the structures and returns a new socket.
 * The returned pointer to a socket is used for the remainder functions.
 * For example, the SysSocketListen() is often used after SysSocket() to bind a socket to a port. This function is defined as follows:
 ```pascal
 function SysSocketListen(Socket: PSocket; QueueLen: LongInt): Boolean;
 ```
-* This function accepts a Socket and QueueLen as arguments. Socket is a pointer to a previously created socket. QueueLen is the number of requests that the socket can accept at the same time. When the number of request is over QueueLen, the kernel starts to drop the requests.
-* This function returns True if sucess, Or, False, otherwise.
-* Before call this function, user has to set the local port in which the socket will listen and the mode, i.e., blocking or non-blocking socket. This is usually done as:
+* This function accepts Socket and QueueLen as arguments. Socket is a pointer to a previously created socket. QueueLen is the number of requests that the socket can accept at the same time. When the number of requests is over QueueLen, the kernel starts to drop the requests.
+* This function returns True if success, Or, False, otherwise.
+* Before calling this function, the user has to set the local port in which the socket will listen and the mode, i.e., blocking or non-blocking socket. This is usually done as:
 ```pascal
   HttpServer := SysSocket(SOCKET_STREAM);
   HttpServer.Sourceport := 80;
   HttpServer.Blocking := True;
   SysSocketListen(HttpServer, 50);
 ```
-* In this case, the HttpServer socket listens at port 80 and the len of queue is 50.
+* In this case, the HttpServer socket listens at port 80 and the length of the queue is 50.
 * SysSocketListen() only binds the port to the socket. It is SysSocketAccept() to get incoming sockets connections.
-* SysSocketAccept() accepts a pointer to a Socket as an argument. The functions waits until a new connection arrives. When this happens, it returns the new socket.
+* SysSocketAccept() accepts a pointer to a Socket as an argument. The function waits until a new connection arrives. When this happens, it returns the new socket.
 * The function is defined as follows:
 ```pascal
 function SysSocketAccept(Socket: PSocket): PSocket;
@@ -272,7 +272,7 @@ The Service variable points to a PNetworkService which is a socket listening on 
     ClientSocket: PSocket;
   end;
 ```
-The ServerSocket is the socket that is listening. The ClientSocket is a simple queue list in which incomming connections are enqueued.
+The ServerSocket is the socket that is listening. The ClientSocket is a simple queue list in which incoming connections are enqueued.
 ```
   while True do
   begin
@@ -295,10 +295,10 @@ The ServerSocket is the socket that is listening. The ClientSocket is a simple q
   end;
 end;
 ```
-The function returns the head of the list of incomming connections. If the list is empty, it calls the scheduler. The function keeps calling the scheduler until an incomming connection arrives.
+The function returns the head of the list of incoming connections. If the list is empty, it calls the scheduler. The function keeps calling the scheduler until an incoming connection arrives.
 
 ## SysSocketSelect()
-* The next function is SysSocketSelect(). This functions blocks until an event arrives to the socket, e.g., new data, timeout, connection closed. The function behaves differently depending the socket is blocking or not blocking. The non-blocking path is not implemented yet. In case the socket is blocking, the function fist sets a timeout to wait for a new event.
+* The next function is SysSocketSelect(). This function blocks until an event arrives to the socket, e.g., new data, timeout, connection closed. The function behaves differently depending whether the socket is blocking or not blocking. The non-blocking path is not implemented yet. In case the socket is blocking, the function first sets a timeout to wait for a new event.
 
 ```pascal
 function SysSocketSelect(Socket: PSocket; TimeOut: LongInt): Boolean;
@@ -353,12 +353,12 @@ end;
 ```
 * The function checks for three conditions for exiting:
 1. The remote peer has disconnected
-2. There is new data in the incomming buffer
+2. There is new data in the incoming buffer
 3. The timeout has running out of time
-If none of these conditions is satified, the function calls the scheduler. Note that here the timeout is aproximative, since the scheduler is cooperative, we do not know when the thread is going to be scheduler again. Other sort of timer are required for hard deadlines.
+If none of these conditions is satisfied, the function calls the scheduler. Note that here the timeout is approximative, since the scheduler is cooperative, we do not know when the thread is going to be scheduler again. Other sort of timers are required for hard deadlines.
 
 
-* The user can used the `UsedDefined` to store information for a given Socket. For example, this is used to store a extra buffer in the StaticWebServer example. For example, this is used in the StaticWebServer example:
+* The user can use the `UsedDefined` to store information for a given Socket. For example, this is used to store an extra buffer in the StaticWebServer example. For example, this is used in the StaticWebServer example:
 ```pascal
     HttpClient := SysSocketAccept(HttpServer);
     rq := ToroGetMem(sizeof(TRequest));
@@ -370,8 +370,8 @@ If none of these conditions is satified, the function calls the scheduler. Note 
 ```
 
 ## SysSocketSend()
-* Sending data through a socket happens with the `SysSocketSend()` function. This is a non-blocking function. The function only blocks if the receiving side is not able to get more data. In this case, the function call the scheduler until the other side becomes available.
-* The function requires one copy from user's buffer.
+* Sending data through a socket happens with the `SysSocketSend()` function. This is a non-blocking function. The function only blocks if the receiving side is not able to get more data. In this case, the function calls the scheduler until the other side becomes available.
+* The function requires one copy from the user's buffer.
 * The function fills the vsock header.
 * It sends the date by using SysNetWorkSend(). This is a non-blocking function. The packets are enqueued into the available ring of the virtio-vsock device.
 * The function returns after sending all the packets
@@ -422,14 +422,14 @@ begin
 end;
 ```
 ## SysSocketRecv()
-* This funcion reads a number of `AddrLen` bytes from the socket buffer and stores them into `Addr`. This function requires one-copy from the Socket buffer.
-* The function inmediatly exits if:
+* This function reads a number of `AddrLen` bytes from the socket buffer and stores them into `Addr`. This function requires one-copy from the Socket buffer.
+* The function immediately exits if:
 1. The socket is not in  SCK_TRANSMITTING state
 2. 0 bytes are requested to be read
-3. The is no more data to be read.
+3. There is no more data to be read.
 The function returns the number of bytes read from the socket buffer.
 The function consumes the data from the internal buffer.
-* This functions exits if there is no data in the internal buffer. This function is usually used together with Select() to block until data is received.
+* This function returns if there is no data in the internal buffer. This function is usually used together with Select() to block until data is received.
 ```pascal
 function SysSocketRecv(Socket: PSocket; Addr: PChar; AddrLen, Flags: UInt32): LongInt;
 var
@@ -458,7 +458,7 @@ begin
     Inc(Socket.BufferReader, FragLen);
     if Socket.BufferReader = Socket.Buffer+Socket.BufferLength then
     begin
-      {$IFDEF DebugSocket} WriteDebug('SysSocketRecv: Reseting Socket.BufferReader\n', []); {$ENDIF}
+      {$IFDEF DebugSocket} WriteDebug('SysSocketRecv: Resetting Socket.BufferReader\n', []); {$ENDIF}
       Socket.BufferReader := Socket.Buffer;
       Socket.BufferLength := 0;
       Break;
@@ -468,7 +468,7 @@ end;
 ```
 
 ## SysSocketPeek()
-The function behaves similar than SysSocketRecv. The main difference is that the data is not consumed from the socket buffer. This is useful when we want to read a whole structure from the buffer. We keep calling SysSocketPeek() until it sucess and then we get the whole structure by using SysSocketRecv().
+The function behaves similar than SysSocketRecv. The main difference is that the data is not consumed from the socket buffer. This is useful when we want to read a whole structure from the buffer. We keep calling SysSocketPeek() until it succeeds and then we get the whole structure by using SysSocketRecv().
 
 ```pascal
 function SysSocketPeek(Socket: PSocket; Addr: PChar; AddrLen: UInt32): LongInt;
@@ -500,7 +500,7 @@ begin
 end;
 ```
 ## SysSocketConnect()
-This function connects a socket to a remote peer. It returns True if sucesses, or False otherwise. The function is defined as follows:
+This function connects a socket to a remote peer. It returns True if successes, or False otherwise. The function is defined as follows:
 ```pascal
 function SysSocketConnect(Socket: PSocket): Boolean;
 var
@@ -564,7 +564,7 @@ The function exits with error if there is not more memory for the local buffer o
   SysNetworkSend(Packet);
   SetSocketTimeOut(Socket, WAIT_ACK);
 ```
-This call builds an `OP_REQUEST` packet and sends it to the destination CID. It sets an timeout to wait for the remote response. If non response is received, the function returns with error.
+This call builds an `OP_REQUEST` packet and sends it to the destination CID. It sets a timeout to wait for the remote response. If non response is received, the function returns with error.
 ```pascal
   while True do
   begin
