@@ -14,7 +14,7 @@ During registration, the kernel adds the `PNetworkInterface` structure to a list
   TNetworkInterface = record
     Name: array[0..MAX_NET_NAME-1] of Char;
     Minor: LongInt;
-	  CPUID: LongInt;
+    CPUID: LongInt;
     Device: Pointer;
     IncomingPacketsTail: PPacket;
     IncomingPackets: PPacket;
